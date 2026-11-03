@@ -1,0 +1,121 @@
+[
+  {
+    "operationId": "status-snapshot",
+    "method": "GET",
+    "path": "/api/status",
+    "service": "status",
+    "tags": ["Status"],
+    "summary": "Retrieve public Pluggy status",
+    "description": "Connector, product, incident, and infrastructure status. Public, unauthenticated. Avoid polling more than once a minute.",
+    "source": "https://docs.pluggy.ai/en/reference/status/status-snapshot"
+  },
+  {
+    "operationId": "status-connectors-incidents",
+    "method": "GET",
+    "path": "/api/connectors-incidents",
+    "service": "status",
+    "tags": ["Status"],
+    "summary": "Retrieve active connector incidents",
+    "description": "Public, unauthenticated connector incidents.",
+    "source": "https://docs.pluggy.ai/en/reference/status/status-connector-incidents"
+  },
+  {
+    "operationId": "status-summary",
+    "method": "GET",
+    "path": "/api/summary",
+    "service": "status",
+    "tags": ["Status"],
+    "summary": "Retrieve public status summary",
+    "description": "Public, unauthenticated Pluggy status summary.",
+    "source": "https://docs.pluggy.ai/en/reference/status/status-summary"
+  },
+  {
+    "operationId": "enrichment-categorize",
+    "method": "POST",
+    "path": "/categorize",
+    "service": "enrichment",
+    "tags": ["Enrichment"],
+    "summary": "Categorize transactions",
+    "description": "Requires PLUGGY_ENRICHMENT_API_KEY and the enrichment product entitlement. Accepts at most 5000 transactions. Does not change bank transactions.",
+    "source": "https://docs.pluggy.ai/en/reference/enrichment/categorize",
+    "requestBody": {
+      "required": true,
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "required": ["transactions"],
+            "properties": {
+              "clientUserId": { "type": "string" },
+              "isBusiness": { "type": "boolean" },
+              "accountType": {
+                "type": "string",
+                "enum": ["CHECKING", "CREDIT_CARD"]
+              },
+              "transactions": {
+                "type": "array",
+                "maxItems": 5000,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "description": { "type": "string" },
+                    "type": { "type": "string", "enum": ["CREDIT", "DEBIT"] },
+                    "amount": { "type": "number" },
+                    "date": { "type": "string" },
+                    "paymentData": { "type": ["object", "null"] },
+                    "creditCardMetadata": { "type": ["object", "null"] }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "operationId": "enrichment-behavior-analysis",
+    "method": "POST",
+    "path": "/behavior-analysis",
+    "service": "enrichment",
+    "tags": ["Enrichment"],
+    "summary": "Analyze financial behavior",
+    "description": "Requires PLUGGY_ENRICHMENT_API_KEY and the enrichment product entitlement.",
+    "source": "https://docs.pluggy.ai/en/reference/enrichment/behavior-analysis",
+    "requestBody": {
+      "required": true,
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "required": ["itemId"],
+            "properties": { "itemId": { "type": "string", "format": "uuid" } }
+          }
+        }
+      }
+    }
+  },
+  {
+    "operationId": "enrichment-recurring-payments",
+    "method": "POST",
+    "path": "/recurring-payments",
+    "service": "enrichment",
+    "tags": ["Enrichment"],
+    "summary": "Analyze recurring payments",
+    "description": "Requires PLUGGY_ENRICHMENT_API_KEY and the enrichment product entitlement.",
+    "source": "https://docs.pluggy.ai/en/reference/enrichment/recurring-payments",
+    "requestBody": {
+      "required": true,
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "required": ["itemId"],
+            "properties": { "itemId": { "type": "string", "format": "uuid" } }
+          }
+        }
+      }
+    }
+  }
+]

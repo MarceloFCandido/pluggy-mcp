@@ -1,0 +1,6 @@
+dist/
+node_modules/
+package-lock.json
+# Keep the upstream snapshot verbatim and the generated reference reproducible.
+spec/pluggy-openapi.json
+docs/API.md
