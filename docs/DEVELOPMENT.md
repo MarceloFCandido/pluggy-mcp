@@ -12,7 +12,11 @@ The project has two execution paths: the same API catalog can call Pluggy direct
 | `src/server.ts`   | MCP tools/resources, source routing, operator write permission                              |
 | `src/index.ts`    | Environment configuration, stdio, optional scheduling/receiver, lifecycle                   |
 
-No service container, ORM, arbitrary-SQL tool, or mandatory database is needed. API responses are kept as JSONB so new upstream fields survive synchronization without schema churn. Cross-record financial calculations use PostgreSQL numeric values rather than JavaScript floating-point arithmetic.
+Without `DATABASE_URL`, financial responses pass from Pluggy to the MCP client without being persisted by this server. With it, sync writes those responses into `pluggy_mcp.records.data`, a JSONB column **inside PostgreSQL**. JSONB keeps upstream fields without a separate SQL column for each one. There is no local financial JSON cache, filesystem mirror, or third store. PostgreSQL numeric arithmetic produces exact decimal sums.
+
+`PLUGGY_ITEM_IDS` controls which items can enter the mirror. Startup reconciles that list with `pluggy_mcp.items`; removed IDs are disabled, and events cannot register new ones. Keep the same configuration in clients and workers sharing a mirror. Retained data stays in PostgreSQL until its operator removes it.
+
+Only `worker` runs polling, the HTTP receiver, and automatic queue processing. Stdio serves LLM tool calls; `pluggy_sync` drains due events and imports on demand. The [README](../README.md) explains both flows for users.
 
 ## Checks
 
@@ -42,7 +46,7 @@ npm run test:postgres
 npm run docs:api
 ```
 
-Review the downloaded spec diff. The runtime uses the checked-in snapshot; it never downloads executable tool definitions at startup. The main snapshot currently contains 94 operations. Three status and three enrichment operations are separately maintained in `spec/additional-operations.json`, each with its primary source. If upstream adds these to its main spec, remove duplicate supplemental definitions and update the coverage test.
+Review the downloaded spec diff. The runtime uses the checked-in snapshot; it never downloads executable tool definitions at startup. The unmodified main snapshot contains 94 operations. `householdPaths` in `src/catalog.ts` selects the financial/connection endpoints; payment initiation and administration are excluded. Three status and two enrichment operations are maintained in `spec/additional-operations.json`, each with its primary source. If upstream adds these to its main spec, remove duplicate supplemental definitions and update the coverage test.
 
 OpenAPI input references are inlined because MCP clients need standalone schemas. The main spec currently has acyclic component references. Unsupported or cyclic future structures should fail the update checks instead of silently dropping parameters. The documented date-only query parameters are normalized from the upstream spec's `date-time` format to `date`.
 
@@ -53,8 +57,10 @@ OpenAPI input references are inlined because MCP clients need standalone schemas
 - Never follow upstream or webhook-provided arbitrary URLs with credentials. Follow cursor values on the original operation and filter scope.
 - A failed list page must leave the previous collection snapshot intact.
 - An unsynchronized mirror must return an error, never an empty balance or transaction result.
-- Explicit transaction deletion events are application-scoped. Absence from a shorter history window does not mean deletion.
+- Explicit transaction deletion events are application-scoped. Preserve absent posted history; retire absent pending entries only after a full import. Absence from a shorter history window does not prove deletion.
 - Local maintenance failure after a successful API write must not turn the remote success into a retryable failure.
+- Reads use a repeatable-read transaction so rows and freshness describe the same snapshot. Transaction cursors are bound to its scope revisions and filters.
+- Summaries always separate accounts and currencies; bank and card signs differ.
 - SQL identifiers come from fixed code maps; all user values are bound parameters.
 - Return source, freshness, and partial-sync errors. A mirror's current timestamp is different from its bank's last refresh.
 - Keep human setup in README and operating guidance in `docs/LLMS.md`; avoid duplicating configuration facts across guides.

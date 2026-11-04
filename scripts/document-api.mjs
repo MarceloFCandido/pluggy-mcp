@@ -5,9 +5,9 @@ import { cachedOperations } from "../dist/storage.js";
 const lines = [
   "# API coverage",
   "",
-  "Generated from the pinned OpenAPI catalog and the separately documented status/enrichment operations. Run `npm run docs:api` after updating the catalog.",
+  "Generated from the household-finance selection in the pinned OpenAPI catalog and the separately documented status/enrichment operations. Run `npm run docs:api` after updating the catalog.",
   "",
-  "Tool arguments use `path`, `query`, and `body` groups. Financial read tools also accept `source`: `auto`, `api`, or `database`. Inspect the tool schema for the complete parameters. API-key generation stays internal.",
+  "Tool arguments use `path`, `query`, and `body` groups. Financial read tools also accept `source`: `auto`, `api`, or `database`. Inspect the tool schema for the complete parameters. API-key generation stays internal. Payment initiation, boleto issuing, credit-risk analysis, connect-token generation, connector credential validation, and webhook administration are excluded. Connection health always uses the API; cached account balances reflect their synchronization time.",
   "",
   "| API | Operation ID | MCP tool | PostgreSQL reads |",
   "| --- | --- | --- | --- |",
