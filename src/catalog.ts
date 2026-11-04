@@ -50,6 +50,8 @@ function inputSchema(
   const properties: JsonObject = {};
   const required: string[] = [];
   const parameters = [...inherited, ...(op.parameters ?? [])].map(resolve);
+  if (parameters.some((p) => !["path", "query"].includes(p.in)))
+    throw new Error(`Unsupported parameter location: ${op.operationId}`);
   for (const location of ["path", "query"]) {
     const selected = parameters.filter((p) => p.in === location);
     if (!selected.length) continue;
@@ -105,8 +107,45 @@ function inputSchema(
   };
 }
 
-export const operations: Operation[] = Object.entries(spec.paths).flatMap(
-  ([path, entry]: [string, any]) =>
+// Keep the household-finance surface explicit; new upstream products need a deliberate review.
+const householdPaths = new Set([
+  "/auth",
+  "/connectors",
+  "/connectors/{id}",
+  "/items",
+  "/items/{id}",
+  "/items/{id}/resources",
+  "/items/{id}/mfa",
+  "/items/{id}/disable-auto-sync",
+  "/items/{id}/scr",
+  "/v2/items",
+  "/consents",
+  "/consents/{id}",
+  "/accounts",
+  "/accounts/{id}",
+  "/accounts/{id}/balance",
+  "/transactions",
+  "/v2/transactions",
+  "/transactions/{id}",
+  "/investments",
+  "/investments/{id}",
+  "/investments/{id}/transactions",
+  "/identity",
+  "/identity/{id}",
+  "/categories",
+  "/categories/{id}",
+  "/categories/rules",
+  "/categories/rules/{id}",
+  "/loans",
+  "/loans/{id}",
+  "/merchants",
+  "/bills",
+  "/bills/{id}",
+]);
+
+export const operations: Operation[] = Object.entries(spec.paths)
+  .filter(([path]) => householdPaths.has(path))
+  .flatMap(([path, entry]: [string, any]) =>
     Object.entries(entry)
       .filter(([method]) =>
         ["get", "post", "patch", "put", "delete"].includes(method),
@@ -126,7 +165,7 @@ export const operations: Operation[] = Object.entries(spec.paths).flatMap(
           ...inputSchema(op, entry.parameters ?? []),
         };
       }),
-);
+  );
 
 // These separately hosted products are documented in the reference but absent from the main OAS.
 const extras: JsonObject[] = JSON.parse(
@@ -156,7 +195,9 @@ if (new Set(operations.map((op) => op.name)).size !== operations.length)
   throw new Error("Duplicate tool names in the API catalog.");
 
 export const operationById = new Map(operations.map((op) => [op.id, op]));
-export const operationByName = new Map(operations.map((op) => [op.name, op]));
+export const operationByName = new Map(
+  operations.filter((op) => op.id !== "auth-create").map((op) => [op.name, op]),
+);
 export const ajv = new Ajv2020({
   strict: false,
   allErrors: true,

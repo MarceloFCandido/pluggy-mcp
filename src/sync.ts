@@ -9,14 +9,14 @@ export class Synchronizer {
     readonly storage: Storage,
   ) {}
 
-  async sync(itemIds?: string[]): Promise<JsonObject> {
+  async sync(itemIds?: string[], retryEvents = false): Promise<JsonObject> {
     // One run per process; reject instead of silently dropping a different requested scope.
     if (this.running)
       throw new AppError(
         "SYNC_IN_PROGRESS",
         "A synchronization is already running. Check pluggy_sync_status and retry later.",
       );
-    this.running = this.run(itemIds).finally(() => {
+    this.running = this.run(itemIds, retryEvents).finally(() => {
       this.running = undefined;
     });
     return this.running;
@@ -30,23 +30,41 @@ export class Synchronizer {
     }
   }
 
-  private async run(requested?: string[]): Promise<JsonObject> {
-    const ids = requested?.length ? requested : await this.storage.itemIds();
-    if (!ids.length)
-      throw new AppError(
-        "NO_ITEMS",
-        "Set PLUGGY_ITEM_IDS or use pluggy_register_items. Meu Pluggy cannot discover item IDs through GET /v2/items.",
-      );
-    await this.storage.registerItems(ids, !!requested?.length);
+  private async run(
+    requested?: string[],
+    retryEvents = false,
+  ): Promise<JsonObject> {
     const results: JsonObject[] = [];
     await this.storage.withSyncLock(async () => {
+      const registered = await this.storage.itemIds();
+      const ids = requested?.length ? requested : registered;
+      if (!ids.length)
+        throw new AppError(
+          "NO_ITEMS",
+          "Set PLUGGY_ITEM_IDS. Meu Pluggy cannot discover item IDs through GET /v2/items.",
+        );
+      if (ids.some((id) => !registered.includes(id)))
+        throw new AppError(
+          "ITEM_NOT_CONFIGURED",
+          "Sync can only import items enabled by PLUGGY_ITEM_IDS.",
+        );
+      if (retryEvents)
+        await this.storage.pool.query(
+          "UPDATE pluggy_mcp.events SET attempts=0,next_attempt_at=now() WHERE application_id=$1 AND processed_at IS NULL",
+          [this.storage.namespace],
+        );
+      await this.pendingEvents();
       for (const itemId of ids) results.push(await this.item(itemId));
     });
+    const { events } = await this.storage.status();
     return {
       source: "api",
       storedIn: "database",
       items: results,
-      complete: results.every((result) => result.errors.length === 0),
+      events,
+      complete:
+        results.every((result) => result.errors.length === 0) &&
+        events.pending === 0,
     };
   }
 
@@ -84,6 +102,21 @@ export class Synchronizer {
     const products: string[] | undefined = item[0].products;
     const enabled = (...names: string[]) =>
       !products || names.some((name) => products.includes(name));
+    const availability: [Resource, boolean][] = [
+      ["accounts", enabled("ACCOUNTS", "CREDIT_CARDS", "TRANSACTIONS")],
+      ["transactions", enabled("TRANSACTIONS")],
+      ["bills", enabled("ACCOUNTS", "CREDIT_CARDS", "TRANSACTIONS")],
+      ["investments", enabled("INVESTMENTS", "INVESTMENTS_TRANSACTIONS")],
+      ["investment_transactions", enabled("INVESTMENTS_TRANSACTIONS")],
+      ["identity", enabled("IDENTITY")],
+      ["loans", enabled("LOANS")],
+    ];
+    await this.storage.unavailable(
+      itemId,
+      availability
+        .filter(([, available]) => !available)
+        .map(([resource]) => resource),
+    );
     if (enabled("ACCOUNTS", "CREDIT_CARDS", "TRANSACTIONS")) {
       const accounts = await capture("accounts", itemId, () =>
         this.client.listAll("accounts-list", { query: { itemId } }),
@@ -121,9 +154,20 @@ export class Synchronizer {
     }
     if (enabled("IDENTITY"))
       await capture("identity", itemId, async () => {
-        const value = await this.client.request("identity-find-by-item", {
-          query: { itemId },
-        });
+        let value;
+        try {
+          value = await this.client.request("identity-find-by-item", {
+            query: { itemId },
+          });
+        } catch (error) {
+          if (
+            error instanceof ApiError &&
+            error.status === 404 &&
+            (error.details as JsonObject).code === "IDENTITY_NOT_FOUND"
+          )
+            return [];
+          throw error;
+        }
         return Array.isArray(value?.results)
           ? value.results
           : value
@@ -143,39 +187,46 @@ export class Synchronizer {
   async processEvents(): Promise<void> {
     // Hold the application lock while applying events as well, so an older snapshot cannot resurrect deletions.
     try {
-      await this.storage.withSyncLock(async () => {
-        const pending = await this.storage.pool.query(
-          "SELECT id,payload FROM pluggy_mcp.events WHERE application_id=$1 AND processed_at IS NULL AND attempts<5 ORDER BY received_at,id LIMIT 20",
-          [this.storage.namespace],
-        );
-        for (const { id, payload } of pending.rows) {
-          try {
-            await this.event(payload);
-            await this.storage.pool.query(
-              "UPDATE pluggy_mcp.events SET processed_at=now(),last_error=NULL WHERE application_id=$1 AND id=$2",
-              [this.storage.namespace, id],
-            );
-          } catch (error) {
-            const code =
-              error instanceof ApiError
-                ? `HTTP_${error.status}`
-                : error instanceof AppError
-                  ? error.code
-                  : "EVENT_FAILED";
-            await this.storage.pool.query(
-              "UPDATE pluggy_mcp.events SET attempts=attempts+1,last_error=$3 WHERE application_id=$1 AND id=$2",
-              [this.storage.namespace, id, code],
-            );
-          }
-        }
-      });
+      await this.storage.withSyncLock(() => this.pendingEvents());
     } catch (error) {
       if (!(error instanceof AppError && error.code === "SYNC_IN_PROGRESS"))
         throw error;
     }
   }
 
+  private async pendingEvents(): Promise<void> {
+    const pending = await this.storage.pool.query(
+      "SELECT id,payload FROM pluggy_mcp.events WHERE application_id=$1 AND processed_at IS NULL AND attempts<10 AND next_attempt_at<=now() ORDER BY received_at,id LIMIT 20",
+      [this.storage.namespace],
+    );
+    for (const { id, payload } of pending.rows) {
+      try {
+        await this.event(payload);
+        await this.storage.pool.query(
+          "UPDATE pluggy_mcp.events SET processed_at=now(),last_error=NULL WHERE application_id=$1 AND id=$2",
+          [this.storage.namespace, id],
+        );
+      } catch (error) {
+        const code =
+          error instanceof ApiError
+            ? `HTTP_${error.status}`
+            : error instanceof AppError
+              ? error.code
+              : "EVENT_FAILED";
+        await this.storage.pool.query(
+          "UPDATE pluggy_mcp.events SET attempts=attempts+1,last_error=$3,next_attempt_at=now()+interval '30 seconds'*power(2,attempts) WHERE application_id=$1 AND id=$2",
+          [this.storage.namespace, id, code],
+        );
+      }
+    }
+  }
+
   private async event(payload: JsonObject): Promise<void> {
+    if (
+      payload.itemId &&
+      !(await this.storage.itemIds()).includes(payload.itemId)
+    )
+      return;
     if (payload.event === "transactions/deleted") {
       if (!Array.isArray(payload.transactionIds))
         throw new AppError(
@@ -234,38 +285,26 @@ export class Synchronizer {
             );
           }
         } else {
-          let createdAtFrom = payload.transactionsCreatedAtFrom;
-          if (
-            !createdAtFrom &&
-            typeof payload.createdTransactionsLink === "string"
-          ) {
-            const link = new URL(payload.createdTransactionsLink);
-            if (
-              link.origin !== "https://api.pluggy.ai" ||
-              !["/transactions", "/v2/transactions"].includes(link.pathname) ||
-              link.searchParams.get("accountId")?.toLowerCase() !==
-                payload.accountId
-            ) {
-              throw new AppError(
-                "INVALID_EVENT",
-                "Unexpected created-transactions link.",
-              );
-            }
-            createdAtFrom = link.searchParams.get("createdAtFrom");
-          }
-          if (
-            typeof createdAtFrom !== "string" ||
-            !Number.isFinite(Date.parse(createdAtFrom))
-          )
-            throw new AppError(
-              "INVALID_EVENT",
-              "Creation event requires a valid creation timestamp.",
-            );
+          const createdAtFrom = payload.transactionsCreatedAtFrom;
+          // No payload URLs are followed or parsed. Without a usable filter, re-read the account.
+          const incremental =
+            typeof createdAtFrom === "string" &&
+            Number.isFinite(Date.parse(createdAtFrom));
           records.push(
             ...(await this.client.listAll("transactions-list-by-cursor", {
-              query: { ...query, createdAtFrom },
+              query: { ...query, ...(incremental ? { createdAtFrom } : {}) },
             })),
           );
+          await this.storage.snapshot(
+            {
+              resource: "transactions",
+              itemId: payload.itemId,
+              parentId: payload.accountId,
+            },
+            records,
+            !incremental,
+          );
+          return;
         }
         await this.storage.snapshot(
           {
@@ -289,7 +328,6 @@ export class Synchronizer {
     ) {
       if (!payload.itemId)
         throw new AppError("INVALID_EVENT", "Data event requires itemId.");
-      await this.storage.registerItems([payload.itemId]);
       // Re-read an authoritative snapshot: handles out-of-order notifications and does not trust URLs in payloads.
       const result = await this.item(payload.itemId);
       if (

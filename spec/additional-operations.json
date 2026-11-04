@@ -46,8 +46,12 @@
             "type": "object",
             "required": ["transactions"],
             "properties": {
-              "clientUserId": { "type": "string" },
-              "isBusiness": { "type": "boolean" },
+              "clientUserId": {
+                "type": "string"
+              },
+              "isBusiness": {
+                "type": "boolean"
+              },
               "accountType": {
                 "type": "string",
                 "enum": ["CHECKING", "CREDIT_CARD"]
@@ -58,39 +62,32 @@
                 "items": {
                   "type": "object",
                   "properties": {
-                    "id": { "type": "string" },
-                    "description": { "type": "string" },
-                    "type": { "type": "string", "enum": ["CREDIT", "DEBIT"] },
-                    "amount": { "type": "number" },
-                    "date": { "type": "string" },
-                    "paymentData": { "type": ["object", "null"] },
-                    "creditCardMetadata": { "type": ["object", "null"] }
+                    "id": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["CREDIT", "DEBIT"]
+                    },
+                    "amount": {
+                      "type": "number"
+                    },
+                    "date": {
+                      "type": "string"
+                    },
+                    "paymentData": {
+                      "type": ["object", "null"]
+                    },
+                    "creditCardMetadata": {
+                      "type": ["object", "null"]
+                    }
                   }
                 }
               }
             }
-          }
-        }
-      }
-    }
-  },
-  {
-    "operationId": "enrichment-behavior-analysis",
-    "method": "POST",
-    "path": "/behavior-analysis",
-    "service": "enrichment",
-    "tags": ["Enrichment"],
-    "summary": "Analyze financial behavior",
-    "description": "Requires PLUGGY_ENRICHMENT_API_KEY and the enrichment product entitlement.",
-    "source": "https://docs.pluggy.ai/en/reference/enrichment/behavior-analysis",
-    "requestBody": {
-      "required": true,
-      "content": {
-        "application/json": {
-          "schema": {
-            "type": "object",
-            "required": ["itemId"],
-            "properties": { "itemId": { "type": "string", "format": "uuid" } }
           }
         }
       }
@@ -112,7 +109,12 @@
           "schema": {
             "type": "object",
             "required": ["itemId"],
-            "properties": { "itemId": { "type": "string", "format": "uuid" } }
+            "properties": {
+              "itemId": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
           }
         }
       }

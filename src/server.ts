@@ -52,20 +52,9 @@ const localTools: Tool[] = [
     annotations: { readOnlyHint: true },
   },
   {
-    name: "pluggy_register_items",
-    description:
-      "Register known Pluggy item IDs for synchronization. Meu Pluggy users must obtain IDs from the Dashboard; listing all items is not available to personal accounts. Does not connect, update, or refresh a bank.",
-    inputSchema: object({ itemIds: ids }, ["itemIds"]),
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: true,
-    },
-  },
-  {
     name: "pluggy_sync",
     description:
-      "Synchronize all available financial products of registered or supplied items from Pluggy to PostgreSQL. Follows every page and upserts complete collections. Does not trigger a bank refresh. Inspect complete and per-product errors. May take several minutes; use an appropriate client timeout.",
+      "Synchronize configured items (or a selected subset) from Pluggy to PostgreSQL. Follows every page. Does not refresh a bank connection. Inspect complete, per-product errors, and pending events. May take several minutes.",
     inputSchema: object({
       itemIds: ids,
       retryEvents: {
@@ -94,14 +83,18 @@ const localTools: Tool[] = [
     inputSchema: object({
       ...filterProperties,
       limit: { type: "integer", minimum: 1, maximum: 500, default: 100 },
-      offset: { type: "integer", minimum: 0, default: 0 },
+      cursor: {
+        type: "string",
+        description:
+          "Use nextCursor from the previous page with the same filters. Restart after a sync changes the data.",
+      },
     }),
     annotations: { readOnlyHint: true },
   },
   {
     name: "pluggy_summarize_transactions",
     description:
-      "Aggregate synchronized transactions in PostgreSQL with exact decimal sums returned as strings. Always groups by currency. Original amount signs are preserved. Internal transfers and credit-card bill payments remain included unless filtered out; do not label the raw sum as spending.",
+      "Aggregate synchronized transactions with exact decimal sums. Always separates accounts and currencies: bank debits and credit-card charges use different signs. Transfers and card bill payments remain included unless filtered out; these are raw totals, not household spending.",
     inputSchema: object({
       ...filterProperties,
       groupBy: {
@@ -127,6 +120,14 @@ const localTools: Tool[] = [
 const localValidators = new Map(
   localTools.map((tool) => [tool.name, ajv.compile(tool.inputSchema)]),
 );
+const mirrorWrites = new Set([
+  "items-update",
+  "items-delete",
+  "items-send-mfa",
+  "transactions-Update",
+  "client-category-rules-create",
+  "client-category-rules-delete",
+]);
 
 function result(value: JsonObject, isError = false): CallToolResult {
   return {
@@ -158,12 +159,9 @@ export function createServer(
   const tools = [
     ...apiTools,
     ...localTools.filter(
-      (tool) =>
-        storage ||
-        ["pluggy_capabilities", "pluggy_register_items"].includes(tool.name),
+      (tool) => storage || tool.name === "pluggy_capabilities",
     ),
   ];
-  const registered = new Set(config.itemIds);
   const server = new Server(
     { name: "pluggy-mcp", version: "1.0.0" },
     {
@@ -233,7 +231,7 @@ export function createServer(
           storage &&
           config.allowWrites &&
           op.method !== "GET" &&
-          op.service === "api"
+          mirrorWrites.has(op.id)
         )
           return result(
             await storage.withSyncLock(async () => {
@@ -242,8 +240,6 @@ export function createServer(
               await storage.invalidate();
               const data = await client.request(op, args);
               try {
-                if (op.id === "items-create" && typeof data?.id === "string")
-                  await storage.registerItems([data.id], true);
                 if (op.id === "items-delete")
                   await storage.deleteItem(String(args.path!.id));
               } catch {
@@ -300,31 +296,19 @@ export function createServer(
             enrichmentConfigured: !!config.enrichmentApiKey,
             operations: operations.length,
             apiTools: apiTools.length,
-            itemIds: storage ? await storage.itemIds() : [...registered],
+            itemIds: storage ? await storage.itemIds() : config.itemIds,
             databaseOperations: Object.keys(cachedOperations),
             limits: [
               "Endpoint availability depends on your Pluggy plan, connector, and consent.",
               "Meu Pluggy cannot list all items or manually refresh proxy items.",
               "API-key generation is internal.",
-              "Database sync mirrors financial data; payment execution and real-time balance calls always use the API.",
+              "Connection health and real-time balances always use the API. Payment initiation and application administration are not exposed.",
             ],
           });
-        case "pluggy_register_items":
-          for (const id of input.itemIds as string[]) registered.add(id);
-          if (storage)
-            await storage.registerItems(input.itemIds as string[], true);
-          return result({
-            itemIds: storage ? await storage.itemIds() : [...registered],
-            persisted: !!storage,
-          });
         case "pluggy_sync": {
-          if (input.retryEvents)
-            await storage!.pool.query(
-              "UPDATE pluggy_mcp.events SET attempts=0 WHERE application_id=$1 AND processed_at IS NULL",
-              [storage!.namespace],
-            );
           const synced = await sync!.sync(
             input.itemIds as string[] | undefined,
+            input.retryEvents === true,
           );
           return result(synced);
         }

@@ -40,9 +40,13 @@ CREATE TABLE IF NOT EXISTS pluggy_mcp.events (
   payload jsonb NOT NULL,
   attempts integer NOT NULL DEFAULT 0,
   received_at timestamptz NOT NULL DEFAULT now(),
+  next_attempt_at timestamptz NOT NULL DEFAULT now(),
   processed_at timestamptz,
   last_error text,
   PRIMARY KEY (application_id, id)
 );
+
+-- Also upgrades databases created by the first revision of this PR.
+ALTER TABLE pluggy_mcp.events ADD COLUMN IF NOT EXISTS next_attempt_at timestamptz NOT NULL DEFAULT now();
 
 COMMENT ON SCHEMA pluggy_mcp IS 'Pluggy MCP mirror, isolated by a hash of the configured client ID. Never stores API credentials.';

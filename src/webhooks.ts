@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { UUID } from "./config.js";
 import { Storage } from "./storage.js";
-import type { Config, JsonObject } from "./types.js";
+import { AppError, type Config, type JsonObject } from "./types.js";
 
 const dataEvents = new Set([
   "item/created",
@@ -128,7 +128,14 @@ export async function startWebhooks(
   server.requestTimeout = 10_000;
   server.headersTimeout = 10_000;
   await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
+    server.once("error", () =>
+      reject(
+        new AppError(
+          "WEBHOOK_LISTEN_FAILED",
+          "Could not bind the webhook listener. Check PLUGGY_WEBHOOK_HOST and PLUGGY_WEBHOOK_PORT; another worker may already use the port.",
+        ),
+      ),
+    );
     server.listen(config.webhookPort, config.webhookHost, resolve);
   });
   return server;

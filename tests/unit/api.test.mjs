@@ -31,7 +31,7 @@ const json = (body, status = 200, headers = {}) =>
     headers: { "Content-Type": "application/json", ...headers },
   });
 
-test("every pinned API operation has a unique, valid, self-contained tool schema", () => {
+test("the household catalog has valid schemas and excludes payment and administration endpoints", () => {
   const spec = JSON.parse(
     readFileSync(new URL("../../spec/pluggy-openapi.json", import.meta.url)),
   );
@@ -42,8 +42,25 @@ test("every pinned API operation has a unique, valid, self-contained tool schema
       )
       .map(([, op]) => op.operationId),
   );
-  for (const id of expected) assert.ok(operationById.has(id), id);
-  assert.equal(operations.length, expected.length + 6);
+  for (const id of [
+    "accounts-list",
+    "transactions-Update",
+    "items-update",
+    "investments-list",
+    "bills-list",
+    "client-category-rules-create",
+  ])
+    assert.ok(operationById.has(id), id);
+  for (const id of [
+    "webhooks-list",
+    "webhooks-create",
+    "connect-token-create",
+    "payment-intent-create",
+    "boleto-create",
+    "enrichment-behavior-analysis",
+  ])
+    assert.equal(operationById.has(id), false, id);
+  assert.ok(operations.length < expected.length);
   assert.equal(
     new Set(operations.map((op) => op.name)).size,
     operations.length,
@@ -87,7 +104,7 @@ test("endpoint validation handles referenced bodies, documented dates, and incom
     /schema/,
   );
   assert.throws(
-    () => validateArguments(operationById.get("webhooks-create"), { body: {} }),
+    () => validateArguments(operationById.get("items-create"), { body: {} }),
     /schema/,
   );
   validateArguments(operationById.get("transactions-list-by-cursor"), {
@@ -277,6 +294,52 @@ test("status requests are public and enrichment never reuses the main API token"
   assert.equal(requests.length, 2);
 });
 
+test("GET rate-limit retries honor Retry-After and remain bounded", async () => {
+  let calls = 0;
+  const api = new PluggyClient(config(), async (url) => {
+    if (String(url).endsWith("/auth")) return json({ apiKey: "token" });
+    calls++;
+    return calls < 3
+      ? json({}, 429, { "retry-after": "0.001" })
+      : json({ results: [] });
+  });
+  assert.deepEqual(await api.request("accounts-list", { query: { itemId } }), {
+    results: [],
+  });
+  assert.equal(calls, 3);
+  calls = 0;
+  const blocked = new PluggyClient(config(), async (url) =>
+    String(url).endsWith("/auth")
+      ? json({ apiKey: "token" })
+      : (calls++, json({}, 429, { "retry-after": "0.001" })),
+  );
+  await assert.rejects(
+    blocked.request("accounts-list", { query: { itemId } }),
+    (error) => error.status === 429,
+  );
+  assert.equal(calls, 3);
+});
+
+test("legacy pagination follows totalPages without losing the original item filter", async () => {
+  const seen = [];
+  const api = new PluggyClient(config(), async (url) => {
+    if (String(url).endsWith("/auth")) return json({ apiKey: "token" });
+    const q = new URL(url).searchParams;
+    seen.push(q);
+    return json({
+      page: Number(q.get("page") ?? 1),
+      totalPages: 2,
+      results: [{ id: q.get("page") ?? "1" }],
+    });
+  });
+  assert.deepEqual(await api.listAll("accounts-list", { query: { itemId } }), [
+    { id: "1" },
+    { id: "2" },
+  ]);
+  assert.equal(seen[1].get("page"), "2");
+  assert.equal(seen[1].get("itemId"), itemId);
+});
+
 test("concurrent unauthorized responses do not invalidate an already refreshed token", async () => {
   let auth = 0;
   const api = new PluggyClient(config(), async (url, init) => {
@@ -344,6 +407,20 @@ test("MCP protocol: discover tools/resources, validate inputs, and flag HTTP err
       false,
     );
     assert.ok(tools.some((tool) => tool.name === "pluggy_accounts_list"));
+    for (const name of [
+      "pluggy_webhooks_list",
+      "pluggy_webhooks_retrieve",
+      "pluggy_webhooks_create",
+      "pluggy_payment_intent_create",
+      "pluggy_register_items",
+    ]) {
+      assert.equal(
+        tools.some((tool) => tool.name === name),
+        false,
+      );
+      const hidden = await client.callTool({ name, arguments: {} });
+      assert.equal(hidden.structuredContent.error.code, "UNKNOWN_TOOL");
+    }
     const capabilities = await client.callTool({ name: "pluggy_capabilities" });
     assert.equal(capabilities.structuredContent.mode, "api");
     const failed = await client.callTool({
@@ -390,7 +467,7 @@ test("the built CLI works over stdio from another working directory and exits cl
     const capabilities = await client.callTool({ name: "pluggy_capabilities" });
     assert.equal(capabilities.structuredContent.mode, "api");
     assert.equal(JSON.stringify(capabilities).includes("stdio-secret"), false);
-    assert.ok((await client.listTools()).tools.length >= 100);
+    assert.ok((await client.listTools()).tools.length > 30);
   } finally {
     await client.close();
     await rm(cwd, { recursive: true, force: true });

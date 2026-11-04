@@ -46,7 +46,7 @@ async function main(): Promise<void> {
       );
     try {
       await storage.initialize();
-      await storage.registerItems(config.itemIds);
+      await storage.configureItems(config.itemIds);
       const result = await sync!.sync();
       console.log(JSON.stringify(result, null, 2));
       if (!result.complete) process.exitCode = 2;
@@ -67,9 +67,10 @@ async function main(): Promise<void> {
   try {
     if (storage) {
       await storage.initialize();
-      await storage.registerItems(config.itemIds);
+      await storage.configureItems(config.itemIds);
     }
-    if (config.webhookPort) webhooks = await startWebhooks(config, storage!);
+    if (command === "worker" && config.webhookPort)
+      webhooks = await startWebhooks(config, storage!);
     const schedule = (job: () => Promise<unknown>, interval: number) => {
       const timer = setInterval(() => {
         if (busy || stopping) return;
@@ -102,9 +103,9 @@ async function main(): Promise<void> {
       if (command !== "worker") timer.unref();
       timers.push(timer);
     };
-    if (config.syncIntervalSeconds)
+    if (command === "worker" && config.syncIntervalSeconds)
       schedule(() => sync!.sync(), config.syncIntervalSeconds * 1000);
-    if (storage) schedule(() => sync!.processEvents(), 5000);
+    if (command === "worker") schedule(() => sync!.processEvents(), 5000);
     const stop = async () => {
       if (stopping) return;
       stopping = true;
