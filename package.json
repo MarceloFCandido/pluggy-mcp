@@ -1,20 +1,36 @@
 {
   "name": "pluggy-mcp",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Pluggy API tools for LLM clients, with optional PostgreSQL synchronization",
+  "main": "dist/index.js",
   "type": "module",
   "bin": {
-    "mcp-template-ts": "dist/index.js"
+    "pluggy-mcp": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "spec",
+    "migrations",
+    "docs",
+    ".env.example",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "engines": {
     "node": "^22.23.4 || >=24.22.1"
   },
   "scripts": {
-    "build": "tsc && shx chmod +x dist/*.js",
+    "build": "tsc && shx chmod +x dist/index.js",
+    "start": "node dist/index.js",
+    "sync": "node dist/index.js sync",
+    "worker": "node dist/index.js worker",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "npm run build && node --test tests/unit/*.test.mjs",
+    "test:integration": "npm run build && node --test tests/integration/*.test.mjs",
+    "test:postgres": "node scripts/test-postgres.mjs",
+    "spec:update": "node scripts/update-spec.mjs",
+    "docs:api": "npm run build && node scripts/document-api.mjs",
     "prepare": "npm run build",
     "watch": "tsc --watch"
   },
@@ -22,12 +38,16 @@
   "license": "ISC",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "dotenv": "^16.5.0",
-    "zod": "^3.25.49"
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@types/node": "^22.15.29",
-    "shx": "^0.3.4",
+    "@types/pg": "^8.23.1",
+    "prettier": "^3.9.10",
+    "shx": "^0.4.0",
     "typescript": "^5.7.3"
   }
 }
