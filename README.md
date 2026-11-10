@@ -71,6 +71,8 @@ Use this configuration when you want retained history and database queries:
 
 Use a dedicated database or role. The server creates and updates its `pluggy_mcp` schema, tables, and indexes; it needs those permissions and leaves other application tables alone. API records go in the `data` JSONB column, alongside IDs, sync timestamps, and deletion markers. JSONB is a PostgreSQL column type, not another store or a local JSON file. It keeps upstream fields available without adding a SQL column for each one.
 
+On a shared database, have an administrator create the `pluggy_mcp` schema with the dedicated login as owner (for example, `CREATE SCHEMA pluggy_mcp AUTHORIZATION pluggy` for an existing `pluggy` login). The login can then run migrations without database-level `CREATE`.
+
 The SQL requires PostgreSQL 14+; integration tests run on PostgreSQL 18. Use a direct connection. Session poolers need compatible startup parameters and session advisory locks; transaction pooling is unsupported. TLS follows the driver's connection-string settings, without disabling certificate verification.
 
 `PLUGGY_ITEM_IDS` is the list of connections to mirror. Use the same list in all clients and workers sharing an application/database. Removing an ID and restarting excludes its records from database reads and future syncs; retained rows are not erased. Webhooks cannot add IDs. To mirror a newly connected bank, add its ID and restart.

@@ -1,4 +1,11 @@
-CREATE SCHEMA IF NOT EXISTS pluggy_mcp;
+DO $$
+BEGIN
+  -- An administrator can pre-create the schema so the login needs no database-level CREATE.
+  IF to_regnamespace('pluggy_mcp') IS NULL THEN
+    CREATE SCHEMA IF NOT EXISTS pluggy_mcp;
+  END IF;
+END
+$$;
 
 CREATE TABLE IF NOT EXISTS pluggy_mcp.items (
   application_id text NOT NULL,
