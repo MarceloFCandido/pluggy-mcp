@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolRequestSchema,
@@ -17,6 +18,10 @@ import { PluggyClient } from "./client.js";
 import { cachedOperations, Storage } from "./storage.js";
 import { Synchronizer } from "./sync.js";
 import { AppError, type Config, type JsonObject } from "./types.js";
+
+const { version }: { version: string } = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+);
 
 const uuid = { type: "string", format: "uuid" };
 const ids = {
@@ -163,7 +168,7 @@ export function createServer(
     ),
   ];
   const server = new Server(
-    { name: "pluggy-mcp", version: "1.0.0" },
+    { name: "pluggy-mcp", version },
     {
       capabilities: { tools: {}, resources: {} },
       instructions:
